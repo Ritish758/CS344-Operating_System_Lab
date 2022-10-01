@@ -1,0 +1,238 @@
+diff -ruN xv6-public/defs.h xv6/defs.h
+--- xv6-public/defs.h	2021-09-15 19:12:54.735875539 +0530
++++ xv6/defs.h	2021-09-15 18:15:17.063824000 +0530
+@@ -21,6 +21,7 @@
+ void            cprintf(char*, ...);
+ void            consoleintr(int(*)(void));
+ void            panic(char*) __attribute__((noreturn));
++int             history(char*, int);
+ 
+ // exec.c
+ int             exec(char*, char**);
+diff -ruN xv6-public/Drawtest.c xv6/Drawtest.c
+--- xv6-public/Drawtest.c	1970-01-01 05:30:00.000000000 +0530
++++ xv6/Drawtest.c	2021-09-15 19:10:02.641768000 +0530
+@@ -0,0 +1,29 @@
++#include "types.h"
++#include "stat.h"
++#include "user.h"
++
++const int max_size = 1600;
++
++int main(void)
++{
++
++    
++    void *draw_buffer = malloc(max_size);
++
++    
++    int draw_size = draw(draw_buffer, max_size);
++
++    
++    if (draw_size == -1)
++    {
++  
++        printf(1, "Buffer size is too small\n");
++    }
++    else
++    {
++         
++        printf(1, "%s\n", (char *)draw_buffer);
++    }
++
++    return 0;
++}
+diff -ruN xv6-public/history.c xv6/history.c
+--- xv6-public/history.c	1970-01-01 05:30:00.000000000 +0530
++++ xv6/history.c	2021-09-15 18:15:19.527908000 +0530
+@@ -0,0 +1,24 @@
++#include "types.h"
++#include "stat.h"
++#include "user.h"
++
++#define MAX_HISTORY                 (16)      /*the max number of the comand histories*/
++#define MAX_COMMAND_LENGTH          (128)     /*the max length of the comand*/
++
++
++int main(int argc, char *argv[])
++{
++    char buffer[MAX_COMMAND_LENGTH];
++    int ret = 0;
++    for(int i = 0; i < MAX_HISTORY && ret==0; i++){
++        memset(buffer, 0, 128 * sizeof(char));
++
++        ret = history(buffer, i);
++        
++        if(ret == 0){
++            printf(1, "%s\n", buffer);
++        }
++    }
++
++    exit();
++}
+diff -ruN xv6-public/Makefile xv6/Makefile
+--- xv6-public/Makefile	2021-09-15 19:12:54.735875539 +0530
++++ xv6/Makefile	2021-09-15 18:15:20.783951000 +0530
+@@ -51,7 +51,8 @@
+ endif
+ 
+ # If the makefile can't find QEMU, specify its path here
+-# QEMU = qemu-system-i386
++ QEMU = qemu-system-i386
++# QEMU = qemu-system-x86_64
+ 
+ # Try to infer the correct QEMU
+ ifndef QEMU
+@@ -181,6 +182,8 @@
+ 	_usertests\
+ 	_wc\
+ 	_zombie\
++	_Drawtest\
++	_history\
+ 
+ fs.img: mkfs README $(UPROGS)
+ 	./mkfs fs.img README $(UPROGS)
+diff -ruN xv6-public/syscall.c xv6/syscall.c
+--- xv6-public/syscall.c	2021-09-15 19:12:54.743875621 +0530
++++ xv6/syscall.c	2021-09-15 18:15:30.532284000 +0530
+@@ -103,6 +103,8 @@
+ extern int sys_wait(void);
+ extern int sys_write(void);
+ extern int sys_uptime(void);
++extern int sys_draw(void);
++extern int sys_history(void);
+ 
+ static int (*syscalls[])(void) = {
+ [SYS_fork]    sys_fork,
+@@ -126,6 +128,8 @@
+ [SYS_link]    sys_link,
+ [SYS_mkdir]   sys_mkdir,
+ [SYS_close]   sys_close,
++[SYS_draw]    sys_draw,
++ [SYS_history] sys_history,
+ };
+ 
+ void
+diff -ruN xv6-public/syscall.h xv6/syscall.h
+--- xv6-public/syscall.h	2021-09-15 19:12:54.743875621 +0530
++++ xv6/syscall.h	2021-09-15 18:15:34.320414000 +0530
+@@ -20,3 +20,5 @@
+ #define SYS_link   19
+ #define SYS_mkdir  20
+ #define SYS_close  21
++#define SYS_draw   22
++#define SYS_history 23
+diff -ruN xv6-public/sysproc.c xv6/sysproc.c
+--- xv6-public/sysproc.c	2021-09-15 19:12:54.747875661 +0530
++++ xv6/sysproc.c	2021-09-15 18:15:22.111996000 +0530
+@@ -89,3 +89,88 @@
+   release(&tickslock);
+   return xticks;
+ }
++
++// Added by me
++int sys_draw(void)
++{
++
++  char *buffer;
++  int size;
++
++  char *draw = "               \t\t\t,ood8888booo,\n\
++                              ,od8           8bo,\n\
++                           ,od                   bo,\n\
++                         ,d8                       8b,\n\
++                        ,o                           o,    ,a8b\n\
++                       ,8                             8,,od8  8\n\
++                       8'                             d8'     8b\n\
++                       8                           d8'ba     aP'\n\
++                       Y,                       o8'         aP'\n\
++                        Y8,                      YaaaP'    ba\n\
++                         Y8o                   Y8'         88\n\
++                          `Y8               ,8\"           `P\n\
++                            Y8o        ,d8P'              ba\n\
++                       ooood8888888P\"\"\"'                  P'\n\
++                    ,od                                  8\n\
++                 ,dP     o88o                           o'\n\
++                ,dP          8                          8\n\
++               ,d'   oo       8                       ,8\n\
++               $    d$\"8      8           Y    Y  o   8\n\
++              d    d  d8    od  \"\"boooooooob   d\"\" 8   8\n\
++              $    8  d   ood' ,   8        b  8   '8  b\n\
++              $   $  8  8     d  d8        `b  d    '8  b\n\
++               $  $ 8   b    Y  d8          8 ,P     '8  b\n\
++               `$$  Yb  b     8b 8b         8 8,      '8  o,\n\
++                    `Y  b      8o  $$o      d  b        b   $o\n\
++                     8   '$     8$,,$\"      $   $o      '$o$$\n\
++                      $o$$P\"                 $$o$\n\n              ";
++
++
++  
++  if (argint(1, &size) == -1)
++  {
++    return -1;
++  }
++
++  if (argptr(0, (char **)&buffer, size) == -1)
++  {
++    return -1;
++  }
++
++  
++  int drawsize = 0;
++  while (draw[drawsize] != '\0')
++  {
++    drawsize++;
++  }
++
++  if (drawsize > size)
++  {
++    
++    return -1;
++  }
++
++  for (int i = 0; i < drawsize; i++)
++  {
++    buffer[i] = draw[i];
++  }
++  return drawsize;
++}
++
++
++int sys_history(void){
++    char *buffer;
++    int historyId;
++    int size=128;
++    if(argint(1,&historyId)<0){
++       return -1;
++    }
++    if(argptr(0,(char **)&buffer,size)<0){
++       return -1;
++    }
++    return history(buffer,historyId);
++
++}
++
++
++
+diff -ruN xv6-public/user.h xv6/user.h
+--- xv6-public/user.h	2021-09-15 19:12:54.747875661 +0530
++++ xv6/user.h	2021-09-15 18:15:27.100167000 +0530
+@@ -23,6 +23,9 @@
+ char* sbrk(int);
+ int sleep(int);
+ int uptime(void);
++//Added by me
++int draw(void*, uint);
++int history(char*, int);
+ 
+ // ulib.c
+ int stat(const char*, struct stat*);
+diff -ruN xv6-public/usys.S xv6/usys.S
+--- xv6-public/usys.S	2021-09-15 19:12:54.747875661 +0530
++++ xv6/usys.S	2021-09-15 18:15:29.216239000 +0530
+@@ -29,3 +29,5 @@
+ SYSCALL(sbrk)
+ SYSCALL(sleep)
+ SYSCALL(uptime)
++SYSCALL(draw)
++SYSCALL(history)

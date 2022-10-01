@@ -1,0 +1,1499 @@
+diff --git a/Drawtest.c b/Drawtest.c
+new file mode 100644
+index 0000000..7e003de
+--- /dev/null
++++ b/Drawtest.c
+@@ -0,0 +1,28 @@
++#include "types.h"
++#include "stat.h"
++#include "user.h"
++
++const int size_max = 2048;
++
++int main(void)
++{
++	char *wolf_buffer = malloc(size_max);
++	
++	int wolf_size = draw(wolf_buffer, size_max);
++	
++	
++	if (wolf_size == -1)
++    	{
++        	
++        	printf(1, "Buffer size is too small\n");
++    	}
++    	else
++    	{
++        	 
++        	printf(1, "%s\n", (char *)wolf_buffer);
++    	}
++    	
++    	exit();
++    	
++}
++
+diff --git a/Makefile b/Makefile
+index 09d790c..d694f9c 100644
+--- a/Makefile
++++ b/Makefile
+@@ -71,13 +71,17 @@ QEMU = $(shell if which qemu > /dev/null; \
+ 	echo "***" 1>&2; exit 1)
+ endif
+ 
++ifndef SCHEDFLAG
++SCHEDFLAG := DEFAULT
++endif
++
+ CC = $(TOOLPREFIX)gcc
+ AS = $(TOOLPREFIX)gas
+ LD = $(TOOLPREFIX)ld
+ OBJCOPY = $(TOOLPREFIX)objcopy
+ OBJDUMP = $(TOOLPREFIX)objdump
+-CFLAGS = -fno-pic -static -fno-builtin -fno-strict-aliasing -O2 -Wall -MD -ggdb -m32 -Werror -fno-omit-frame-pointer
+-CFLAGS += $(shell $(CC) -fno-stack-protector -E -x c /dev/null >/dev/null 2>&1 && echo -fno-stack-protector)
++CFLAGS = -fno-pic -static -fno-builtin -fno-strict-aliasing -O2 -Wall -MD -ggdb -m32 -Werror -fno-omit-frame-pointer  
++CFLAGS += $(shell $(CC) -fno-stack-protector -E -x c /dev/null >/dev/null 2>&1 && echo -fno-stack-protector  -D $(SCHEDFLAG) ) 
+ ASFLAGS = -m32 -gdwarf-2 -Wa,-divide
+ # FreeBSD ld wants ``elf_i386_fbsd''
+ LDFLAGS += -m $(shell $(LD) -V | grep elf_i386 2>/dev/null | head -n 1)
+@@ -181,7 +185,12 @@ UPROGS=\
+ 	_usertests\
+ 	_wc\
+ 	_zombie\
+-
++	_Drawtest\
++	_history\
++	_test1\
++	_sanity\
++	_SMLsanity\
++	
+ fs.img: mkfs README $(UPROGS)
+ 	./mkfs fs.img README $(UPROGS)
+ 
+diff --git a/SMLsanity.c b/SMLsanity.c
+new file mode 100644
+index 0000000..63f652a
+--- /dev/null
++++ b/SMLsanity.c
+@@ -0,0 +1,86 @@
++#include "types.h"
++#include "user.h"
++
++int fib(int n)
++{
++	if(n==0 || n==1) return n;
++
++	return fib(n-2)+fib(n-1);
++}
++
++int
++main(int argc, char *argv[])
++{
++	if (argc != 2){
++				printf(1, "Usage: SMLsanity <n>\n");
++				exit();
++ 		}
++	int i;
++	int n;
++	int j = 0;
++	int retime;
++	int rutime;
++	int stime;
++	int sums[3][3];
++	for (i = 0; i < 3; i++)
++		for (j = 0; j < 3; j++)
++			sums[i][j] = 0;
++	n = atoi(argv[1])*3;
++	i = n; //unimportant
++	int pid;
++	for (i = 0; i < n; i++) {
++		j = i % 3;
++		pid = fork();
++		if (pid == 0) {//child
++			j = (getpid() - 4) % 3; // ensures independence from the first son's pid when gathering the results in the second part of the program
++			#ifdef SML
++			switch(j) {
++				case 0:
++          			set_prio(1);
++					break;
++				case 1:
++          			set_prio(2);
++					break;
++				case 2:
++          			set_prio(3);
++					break;
++			}
++			#endif
++        for (j = 0; j < 1000000; j++){printf(1, ""); }
++			// printf(1, "pid %d, time: %d\n", getpid(), uptime());
++			exit(); // children exit here
++		}
++		
++	}
++	for (i = 0; i <  n; i++) {
++		pid = wait2(&retime, &rutime, &stime);
++		int res = (pid - 4) % 3; // correlates to j in the dispatching loop
++		switch(res) {
++			case 0: // CPU bound processes
++				 printf(1, "Priority 1, pid: %d, ready: %d, running: %d, sleeping: %d, turnaround: %d\n", pid, retime, rutime, stime, retime + rutime + stime);
++				sums[0][0] += retime;
++				sums[0][1] += rutime;
++				sums[0][2] += stime;
++				break;
++			case 1: // CPU bound processes, short tasks
++				 printf(1, "Priority 2, pid: %d, ready: %d, running: %d, sleeping: %d, turnaround: %d\n", pid, retime, rutime, stime, retime + rutime + stime);
++				sums[1][0] += retime;
++				sums[1][1] += rutime;
++				sums[1][2] += stime;
++				break;
++			case 2: // simulating I/O bound processes
++				 printf(1, "Priority 3, pid: %d, ready: %d, running: %d, sleeping: %d, turnaround: %d\n", pid, retime, rutime, stime, retime + rutime + stime);
++				sums[2][0] += retime;
++				sums[2][1] += rutime;
++				sums[2][2] += stime;
++				break;
++		}
++	}
++	for (i = 0; i < 3; i++)
++		for (j = 0; j < 3; j++)
++			sums[i][j] /= n;
++  printf(1, "\n\nPriority 1:\nAverage ready time: %d\nAverage running time: %d\nAverage sleeping time: %d\nAverage turnaround time: %d\n\n\n", sums[0][0], sums[0][1], sums[0][2], sums[0][0] + sums[0][1] + sums[0][2]);
++	printf(1, "Priority 2:\nAverage ready time: %d\nAverage running time: %d\nAverage sleeping time: %d\nAverage turnaround time: %d\n\n\n", sums[1][0], sums[1][1], sums[1][2], sums[1][0] + sums[1][1] + sums[1][2]);
++	printf(1, "Priority 3:\nAverage ready time: %d\nAverage running time: %d\nAverage sleeping time: %d\nAverage turnaround time: %d\n\n\n", sums[2][0], sums[2][1], sums[2][2], sums[2][0] + sums[2][1] + sums[2][2]);
++	exit();
++}
+\ No newline at end of file
+diff --git a/console.c b/console.c
+index a280d2b..dda2a0b 100644
+--- a/console.c
++++ b/console.c
+@@ -15,6 +15,57 @@
+ #include "proc.h"
+ #include "x86.h"
+ 
++// Added by me
++#define KEY_UP          0xE2
++#define KEY_DN          0xE3
++#define KEY_LF          0xE4
++#define KEY_RF          0xE5
++
++#define MAX_HISTORY                 (16)     
++#define MAX_COMMAND_LENGTH          (128)
++
++char command_history[MAX_HISTORY][MAX_COMMAND_LENGTH];
++int historycounter=0;
++int currentcommandid=0;
++
++int history(char* buffer, int historyId){
++
++   if(historyId<0 || historyId>=MAX_HISTORY){
++         return 2;
++   }
++   if(historyId>=historycounter){
++       return 1;
++   }
++   memmove(buffer,command_history[historyId],MAX_COMMAND_LENGTH*sizeof(char));
++   return 0;
++}
++
++
++
++
++void add_history(char *command){
++    if(command[0]!='\0'){
++        int length=strlen(command);
++        if(length>MAX_COMMAND_LENGTH){
++           length=MAX_COMMAND_LENGTH-1;
++        }
++        if(historycounter<MAX_HISTORY){
++           historycounter++;
++        }
++        else{
++           for(int i=0; i<MAX_HISTORY-1; i++){
++             memmove(command_history[i],command_history[i+1],sizeof(char)*MAX_COMMAND_LENGTH);
++           }
++        
++        }
++        memmove(command_history[historycounter-1],command,sizeof(char)*length);
++        command_history[historycounter-1][length]='\0';
++        currentcommandid=historycounter;
++    }
++
++} 
++
++
+ static void consputc(int);
+ 
+ static int panicked = 0;
+@@ -162,6 +213,8 @@ cgaputc(int c)
+   crt[pos] = ' ' | 0x0700;
+ }
+ 
++
++
+ void
+ consputc(int c)
+ {
+@@ -184,14 +237,130 @@ struct {
+   uint r;  // Read index
+   uint w;  // Write index
+   uint e;  // Edit index
++  uint pos; // Added by me current index
+ } input;
+ 
+ #define C(x)  ((x)-'@')  // Control-x
+ 
++int back_counter=0;
++
++
++void move_back_cursor(){
++  int pos;
++  
++  // get cursor position
++  outb(CRTPORT, 14);                  
++  pos = inb(CRTPORT+1) << 8;
++  outb(CRTPORT, 15);
++  pos |= inb(CRTPORT+1);    
++
++  // move back
++  pos--;
++  
++  // reset cursor
++  outb(CRTPORT, 15);
++  outb(CRTPORT+1, (unsigned char)(pos&0xFF));
++  outb(CRTPORT, 14);
++  outb(CRTPORT+1, (unsigned char )((pos>>8)&0xFF));
++  //crt[pos] = ' ' | 0x0700;
++  
++}
++
++void move_forward_cursor(){
++  int pos;
++  
++  // get cursor position
++  outb(CRTPORT, 14);                  
++  pos = inb(CRTPORT+1) << 8;
++  outb(CRTPORT, 15);
++  pos |= inb(CRTPORT+1);    
++
++  // move back
++  pos++;
++  
++ // reset cursor
++  outb(CRTPORT, 15);
++  outb(CRTPORT+1, (unsigned char)(pos&0xFF));
++  outb(CRTPORT, 14);
++  outb(CRTPORT+1, (unsigned char )((pos>>8)&0xFF));
++  //crt[pos] = ' ' | 0x0700;
++
++  
++}
++
++void insert_char(int c,int counter){
++  int pos;
++
++  // get cursor position
++  outb(CRTPORT, 14);                  
++  pos = inb(CRTPORT+1) << 8;
++  outb(CRTPORT, 15);
++  pos |= inb(CRTPORT+1);
++
++  for(int i=pos-counter; i>=pos; i--){
++      crt[i+1]=crt[i];
++  }
++  crt[pos] = (c&0xff) | 0x0700; 
++
++  // move cursor to next position
++  pos += 1;
++
++  outb(CRTPORT, 14);
++  outb(CRTPORT+1, pos>>8);
++  outb(CRTPORT, 15);
++  outb(CRTPORT+1, pos);
++}
++
++void remove_char(int counter){
++  int pos;
++  
++  // get cursor position
++  outb(CRTPORT, 14);                  
++  pos = inb(CRTPORT+1) << 8;
++  outb(CRTPORT, 15);
++  pos |= inb(CRTPORT+1);    
++
++  // move back
++  for(int i=pos-1; i<=pos-counter-1; i++){
++     crt[i]=crt[i+1];
++  }
++  crt[pos-counter]=' ' | 0x0700;
++  // reset cursor
++  pos--;
++  outb(CRTPORT, 15);
++  outb(CRTPORT+1, (unsigned char)(pos&0xFF));
++  outb(CRTPORT, 14);
++  outb(CRTPORT+1, (unsigned char )((pos>>8)&0xFF));
++}
++
++void all_remove_char(){
++  int pos;
++  
++  // get cursor position
++  outb(CRTPORT, 14);                  
++  pos = inb(CRTPORT+1) << 8;
++  outb(CRTPORT, 15);
++  pos |= inb(CRTPORT+1);    
++
++  // move back
++  pos--;
++
++  // reset cursor
++  outb(CRTPORT, 15);
++  outb(CRTPORT+1, (unsigned char)(pos&0xFF));
++  outb(CRTPORT, 14);
++  outb(CRTPORT+1, (unsigned char )((pos>>8)&0xFF));
++  crt[pos] = ' ' | 0x0700;
++}
++
++
++
+ void
+ consoleintr(int (*getc)(void))
+ {
+   int c, doprocdump = 0;
++  char buffer[MAX_COMMAND_LENGTH];
++  int x;
+ 
+   acquire(&cons.lock);
+   while((c = getc()) >= 0){
+@@ -208,20 +377,125 @@ consoleintr(int (*getc)(void))
+       }
+       break;
+     case C('H'): case '\x7f':  // Backspace
++     if(input.pos==input.e){
+       if(input.e != input.w){
+         input.e--;
++        input.pos--;
+         consputc(BACKSPACE);
+       }
++      }
++      else if(input.pos!=input.w){
++           remove_char(back_counter);
++          for(int i=input.pos-1; i<=input.e-1; i++){
++            input.buf[i]=input.buf[i+1];
++          }
++          input.e--;
++          input.pos--;
++      }
++      break;
++    case KEY_LF:
++      if(input.pos>input.r){
++          input.pos--;
++          back_counter--;
++          move_back_cursor();
++      }
+       break;
++    case KEY_RF:
++      if(input.pos<input.e){
++           input.pos++;
++           back_counter++;
++           move_forward_cursor();
++      }
++      break; 
++    case KEY_UP:
++      if(currentcommandid==0){ }
++      else if(currentcommandid>0){
++          for(int i=input.pos; i<input.e; i++){
++            move_forward_cursor();
++          }
++          while(input.e>input.w){
++            input.e--;
++            all_remove_char();
++          }
++          for(int i=0; i<strlen(command_history[currentcommandid-1]); i++){
++             x=command_history[currentcommandid-1][i];
++             cgaputc(x);
++             input.buf[input.e++]=x;
++          }
++          currentcommandid--;
++          input.pos=input.e;
++      }
++      break;
++    case KEY_DN:
++      if(currentcommandid==historycounter-1){
++          for(int i=input.pos; i<input.e; i++){
++            move_forward_cursor();
++          }
++          while(input.e>input.w){
++            input.e--;
++            all_remove_char();
++          }
++          currentcommandid=historycounter;
++      }
++      else if(currentcommandid<historycounter-1){
++          for(int i=input.pos; i<input.e; i++){
++            move_forward_cursor();
++          }
++          while(input.e>input.w){
++            input.e--;
++            all_remove_char();
++          }
++          for(int i=0; i<strlen(command_history[currentcommandid+1]); i++){
++             x=command_history[currentcommandid+1][i];
++             cgaputc(x);
++             input.buf[input.e++]=x;
++          }
++          currentcommandid++;
++          input.pos=input.e;
++          
++      }
++      break;     
+     default:
+       if(c != 0 && input.e-input.r < INPUT_BUF){
+         c = (c == '\r') ? '\n' : c;
++        if(c == '\n' || c == C('D') || input.e == input.r+INPUT_BUF){
+         input.buf[input.e++ % INPUT_BUF] = c;
+         consputc(c);
+-        if(c == '\n' || c == C('D') || input.e == input.r+INPUT_BUF){
++        
++        back_counter=0;
++        for(int i=input.w,k=0; i<input.e-1; i++,k++){
++             buffer[k]=input.buf[i % INPUT_BUF];
++        }
++        buffer[(input.e-1-input.w)%INPUT_BUF]='\0';
++        
++        add_history(buffer);
++        
+           input.w = input.e;
++          input.pos=input.e;
+           wakeup(&input.r);
+         }
++        else{
++            if(back_counter==0){
++              input.buf[input.e++ % INPUT_BUF] = c;
++              input.pos++;
++        consputc(c);
++            }
++            else{
++              insert_char(c, back_counter); 
++              for(int k=input.e+1; k >= input.pos; k--){
++              input.buf[(k + 1) % INPUT_BUF] = input.buf[k % INPUT_BUF];
++              }
++
++            //insert
++            input.buf[(input.pos) % INPUT_BUF] = c;
++
++            input.e++;
++            input.pos++;
++
++            //insert the char into CRT propoly position
++            
++            }
++        }
+       }
+       break;
+     }
+diff --git a/defs.h b/defs.h
+index 82fb982..7510de2 100644
+--- a/defs.h
++++ b/defs.h
+@@ -21,6 +21,7 @@ void            consoleinit(void);
+ void            cprintf(char*, ...);
+ void            consoleintr(int(*)(void));
+ void            panic(char*) __attribute__((noreturn));
++int             history(char*, int);
+ 
+ // exec.c
+ int             exec(char*, char**);
+@@ -120,7 +121,7 @@ void            userinit(void);
+ int             wait(void);
+ void            wakeup(void*);
+ void            yield(void);
+-
++int             set_prio(int);
+ // swtch.S
+ void            swtch(struct context**, struct context*);
+ 
+diff --git a/exec.c b/exec.c
+index b40134f..3a81bf9 100644
+--- a/exec.c
++++ b/exec.c
+@@ -99,6 +99,9 @@ exec(char *path, char **argv)
+   curproc->sz = sz;
+   curproc->tf->eip = elf.entry;  // main
+   curproc->tf->esp = sp;
++  #ifdef DML
++  curproc->priority = 2;
++  #endif
+   switchuvm(curproc);
+   freevm(oldpgdir);
+   return 0;
+diff --git a/history.c b/history.c
+new file mode 100644
+index 0000000..4fe1571
+--- /dev/null
++++ b/history.c
+@@ -0,0 +1,24 @@
++#include "types.h"
++#include "stat.h"
++#include "user.h"
++
++#define MAX_HISTORY                 (16)      /*the max number of the comand histories*/
++#define MAX_COMMAND_LENGTH          (128)     /*the max length of the comand*/
++
++
++int main(int argc, char *argv[])
++{
++    char buffer[MAX_COMMAND_LENGTH];
++    int ret = 0;
++    for(int i = 0; i < MAX_HISTORY && ret==0; i++){
++        memset(buffer, 0, 128 * sizeof(char));
++
++        ret = history(buffer, i);
++        
++        if(ret == 0){
++            printf(1, "%s\n", buffer);
++        }
++    }
++
++    exit();
++}
+diff --git a/mypatch.patch b/mypatch.patch
+new file mode 100644
+index 0000000..7194a3b
+--- /dev/null
++++ b/mypatch.patch
+@@ -0,0 +1,148 @@
++diff --git a/Makefile b/Makefile
++index 09d790c..d70ec0c 100644
++--- a/Makefile
+++++ b/Makefile
++@@ -181,6 +181,7 @@ UPROGS=\
++ 	_usertests\
++ 	_wc\
++ 	_zombie\
+++	_Drawtest\
++ 
++ fs.img: mkfs README $(UPROGS)
++ 	./mkfs fs.img README $(UPROGS)
++diff --git a/syscall.c b/syscall.c
++index ee85261..d354acd 100644
++--- a/syscall.c
+++++ b/syscall.c
++@@ -103,6 +103,7 @@ extern int sys_unlink(void);
++ extern int sys_wait(void);
++ extern int sys_write(void);
++ extern int sys_uptime(void);
+++extern int sys_draw(void);
++ 
++ static int (*syscalls[])(void) = {
++ [SYS_fork]    sys_fork,
++@@ -126,6 +127,7 @@ static int (*syscalls[])(void) = {
++ [SYS_link]    sys_link,
++ [SYS_mkdir]   sys_mkdir,
++ [SYS_close]   sys_close,
+++[SYS_draw]    sys_draw,
++ };
++ 
++ void
++diff --git a/syscall.h b/syscall.h
++index bc5f356..03823f0 100644
++--- a/syscall.h
+++++ b/syscall.h
++@@ -20,3 +20,4 @@
++ #define SYS_link   19
++ #define SYS_mkdir  20
++ #define SYS_close  21
+++#define SYS_draw  22
++diff --git a/sysproc.c b/sysproc.c
++index 0686d29..cd51f3e 100644
++--- a/sysproc.c
+++++ b/sysproc.c
++@@ -53,6 +53,8 @@ sys_sbrk(void)
++   addr = myproc()->sz;
++   if(growproc(n) < 0)
++     return -1;
+++    
+++   
++   return addr;
++ }
++ 
++@@ -89,3 +91,72 @@ sys_uptime(void)
++   release(&tickslock);
++   return xticks;
++ }
+++
+++
+++
+++int sys_draw(void)
+++{
+++
+++  char *buf;
+++  int size;
+++
+++  char *wolf = "               \t\t\t,ood8888booo,\n\
+++                              ,od8           8bo,\n\
+++                           ,od                   bo,\n\
+++                         ,d8                       8b,\n\
+++                        ,o                           o,    ,a8b\n\
+++                       ,8                             8,,od8  8\n\
+++                       8'                             d8'     8b\n\
+++                       8                           d8'ba     aP'\n\
+++                       Y,                       o8'         aP'\n\
+++                        Y8,                      YaaaP'    ba\n\
+++                         Y8o                   Y8'         88\n\
+++                          `Y8               ,8\"           `P\n\
+++                            Y8o        ,d8P'              ba\n\
+++                       ooood8888888P\"\"\"'                  P'\n\
+++                    ,od                                  8\n\
+++                 ,dP     o88o                           o'\n\
+++                ,dP          8                          8\n\
+++               ,d'   oo       8                       ,8\n\
+++               $    d$\"8      8           Y    Y  o   8\n\
+++              d    d  d8    od  \"\"boooooooob   d\"\" 8   8\n\
+++              $    8  d   ood' ,   8        b  8   '8  b\n\
+++              $   $  8  8     d  d8        `b  d    '8  b\n\
+++               $  $ 8   b    Y  d8          8 ,P     '8  b\n\
+++               `$$  Yb  b     8b 8b         8 8,      '8  o,\n\
+++                    `Y  b      8o  $$o      d  b        b   $o\n\
+++                     8   '$     8$,,$\"      $   $o      '$o$$\n\
+++                      $o$$P\"                 $$o$\n\n";
+++
+++
+++  if (argint(1, &size) == -1)
+++  {
+++    return -1;
+++  }
+++
+++  
+++  if (argptr(0, (char **)&buf, size) == -1)
+++  {
+++    return -1;
+++  }
+++
+++
+++  int numofchar = 0;
+++  while (wolf[numofchar] != '\0')
+++  {
+++    numofchar++;
+++  }
+++
+++  if (numofchar > size)
+++  {
+++    return -1;
+++  }
+++
+++  for (int i = 0; i < numofchar; i++)
+++  {
+++    buf[i] = wolf[i];
+++  }
+++
+++  return numofchar;
+++}
+++
++diff --git a/user.h b/user.h
++index 4f99c52..991e6c6 100644
++--- a/user.h
+++++ b/user.h
++@@ -23,6 +23,7 @@ int getpid(void);
++ char* sbrk(int);
++ int sleep(int);
++ int uptime(void);
+++int draw(void *buf, uint size);
++ 
++ // ulib.c
++ int stat(const char*, struct stat*);
++diff --git a/usys.S b/usys.S
++index 8bfd8a1..d9be91e 100644
++--- a/usys.S
+++++ b/usys.S
++@@ -29,3 +29,4 @@ SYSCALL(getpid)
++ SYSCALL(sbrk)
++ SYSCALL(sleep)
++ SYSCALL(uptime)
+++SYSCALL(draw)
+diff --git a/param.h b/param.h
+index a7e90ef..d0db235 100644
+--- a/param.h
++++ b/param.h
+@@ -11,4 +11,4 @@
+ #define LOGSIZE      (MAXOPBLOCKS*3)  // max data blocks in on-disk log
+ #define NBUF         (MAXOPBLOCKS*3)  // size of disk block cache
+ #define FSSIZE       1000  // size of file system in blocks
+-
++#define QUANTA       5
+diff --git a/proc.c b/proc.c
+index 806b1b1..d9d5c5a 100644
+--- a/proc.c
++++ b/proc.c
+@@ -88,7 +88,11 @@ allocproc(void)
+ found:
+   p->state = EMBRYO;
+   p->pid = nextpid++;
+-
++  p->ctime = ticks;
++  p->stime = 0;
++  p->retime = 0;
++  p->rutime = 0;
++  p->priority = 2;
+   release(&ptable.lock);
+ 
+   // Allocate kernel stack.
+@@ -112,6 +116,7 @@ found:
+   memset(p->context, 0, sizeof *p->context);
+   p->context->eip = (uint)forkret;
+ 
++  cprintf("pid: %d | ctime: %d\n", p->pid, p->ctime);
+   return p;
+ }
+ 
+@@ -213,7 +218,7 @@ fork(void)
+   pid = np->pid;
+ 
+   acquire(&ptable.lock);
+-
++  np->priority=np->parent->priority;
+   np->state = RUNNABLE;
+ 
+   release(&ptable.lock);
+@@ -311,6 +316,53 @@ wait(void)
+   }
+ }
+ 
++int wait2(int *retime, int *rutime, int *stime) {
++  struct proc *p;
++  int havekids, pid;
++  struct proc *curproc = myproc();
++  
++  acquire(&ptable.lock);
++  for(;;){
++    // Scan through table looking for zombie children.
++    havekids = 0;
++    for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
++      if(p->parent != curproc)
++        continue;
++      havekids = 1;
++      if(p->state == ZOMBIE){
++        // Found one.
++        *retime = p->retime;
++        *rutime = p->rutime;
++        *stime = p->stime;
++        pid = p->pid;
++        kfree(p->kstack);
++        p->kstack = 0;
++        freevm(p->pgdir);
++        p->state = UNUSED;
++        p->pid = 0;
++        p->parent = 0;
++        p->name[0] = 0;
++        p->killed = 0;
++        p->ctime = 0;
++        p->retime = 0;
++        p->rutime = 0;
++        p->stime = 0;
++        release(&ptable.lock);
++        return pid;
++      }
++    }
++
++    // No point waiting if we don't have any children.
++    if(!havekids || curproc->killed){
++      release(&ptable.lock);
++      return -1;
++    }
++
++    // Wait for children to exit.  (See wakeup1 call in proc_exit.)
++    sleep(curproc, &ptable.lock);  //DOC: wait-sleep
++  }
++}
++
+ //PAGEBREAK: 42
+ // Per-CPU process scheduler.
+ // Each CPU calls scheduler() after setting itself up.
+@@ -322,27 +374,39 @@ wait(void)
+ void
+ scheduler(void)
+ {
+-  struct proc *p;
++  
+   struct cpu *c = mycpu();
+   c->proc = 0;
+   
++  int index1=0;
++  int index2=0;
++  int index3=0;
++  int x = index1;
++  index1 = x;
++  x = index2;
++  index2 = x;
++  x = index3;
++  index3 = x;
++
+   for(;;){
+     // Enable interrupts on this processor.
+     sti();
+ 
+     // Loop over process table looking for process to run.
+     acquire(&ptable.lock);
++    
++    #ifdef DEFAULT
++    struct proc *p;
+     for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
+       if(p->state != RUNNABLE)
+         continue;
+-
+-      // Switch to chosen process.  It is the process's job
++         // Switch to chosen process.  It is the process's job
+       // to release ptable.lock and then reacquire it
+       // before jumping back to us.
+       c->proc = p;
+       switchuvm(p);
+       p->state = RUNNING;
+-
++      p->scheduletime=ticks;
+       swtch(&(c->scheduler), p->context);
+       switchkvm();
+ 
+@@ -350,18 +414,91 @@ scheduler(void)
+       // It should have changed its p->state before coming back.
+       c->proc = 0;
+     }
++    
++   #elif FCFS
++   //cprintf("I AM FCFS");
++   struct proc *p;
++   struct proc *minP = 0;
++    for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
++         if(p->state == RUNNABLE){
++             if(minP != 0){
++                if(p->ctime < minP->ctime){
++                   minP = p;
++                   //cprintf("pid_min: %d | ctime_min: %d\n", minP->pid, minP->ctime);
++                }
++             }
++             else{
++               minP=p;
++               //cprintf("pid_min: %d | ctime_min: %d\n", minP->pid, minP->ctime);
++             }
++         }
++    }
++    if(minP!=0){
++       p=minP;
++       c->proc=p;
++       switchuvm(p);
++       p->state = RUNNING;
++       swtch(&(c->scheduler), p->context);
++       switchkvm();
++       c->proc=0;
++       //cprintf("pid: %d\n", p->pid);
++    }
++  
++  #elif SML   
++  struct proc *p;
++  struct proc *highestP = 0;
++    for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
++         if(p->state == RUNNABLE){
++             if(highestP != 0){
++                if(highestP->priority < p->priority){
++                   highestP = p;
++                   //cprintf("pid_min: %d | ctime_min: %d\n", minP->pid, minP->ctime);
++                }
++             }
++             else{
++               highestP=p;
++               //cprintf("pid_min: %d | ctime_min: %d\n", minP->pid, minP->ctime);
++             }
++         }
++    }
++    if(highestP!=0){
++       p=highestP;
++       c->proc=p;
++       switchuvm(p);
++       p->state = RUNNING;
++       swtch(&(c->scheduler), p->context);
++       switchkvm();
++       c->proc=0;
++    }
++  
++  
++  #elif DML
++  struct proc *p;
++  int priority=3;
++   p=prioritySearch(&index1, &index2, &index3, &priority);
++   if(p!=0)
++   {
++   	c->proc=p;
++   	switchuvm(p);
++   	p->state = RUNNING;
++    p->scheduletime=ticks;
++   	swtch(&(c->scheduler), p->context);
++    switchkvm();
++    c->proc=0;
++   }   
++
++
++   #endif
++     
++  
++    
+     release(&ptable.lock);
+ 
+   }
+ }
+ 
+-// Enter scheduler.  Must hold only ptable.lock
+-// and have changed proc->state. Saves and restores
+-// intena because intena is a property of this
+-// kernel thread, not this CPU. It should
+-// be proc->intena and proc->ncli, but that would
+-// break in the few places where a lock is held but
+-// there's no process.
++
++
+ void
+ sched(void)
+ {
+@@ -462,6 +599,9 @@ wakeup1(void *chan)
+   for(p = ptable.proc; p < &ptable.proc[NPROC]; p++)
+     if(p->state == SLEEPING && p->chan == chan)
+       p->state = RUNNABLE;
++      #ifdef DML
++        p->priority=3;
++      #endif
+ }
+ 
+ // Wake up all processes sleeping on chan.
+@@ -532,3 +672,81 @@ procdump(void)
+     cprintf("\n");
+   }
+ }
++
++void Update_Ticks()
++{
++	struct proc *p;
++	acquire(&ptable.lock);
++	for(p = ptable.proc; p < &ptable.proc[NPROC]; p++)
++	{
++		switch(p->state)
++		{
++			case SLEEPING:
++			p->stime++;
++			break;
++			
++			case RUNNABLE:
++			p->retime++;
++			break;
++			
++			case RUNNING:
++			p->rutime++;
++			break;
++			
++			default:
++			;
++		}
++	}
++	release(&ptable.lock);
++}
++
++struct proc* prioritySearch(int *index1, int *index2, int *index3, int *priority)
++{
++int i;
++  struct proc* proc2;
++notfound:
++  for (i = 0; i < NPROC; i++) {
++    switch(*priority) {
++      case 1:
++        proc2 = &ptable.proc[(*index1 + i) % NPROC];
++        if (proc2->state == RUNNABLE && proc2->priority == *priority) {
++          *index1 = (*index1 + 1 + i) % NPROC;
++          return proc2; // found a runnable process with appropriate priority
++        }
++      case 2:
++        proc2 = &ptable.proc[(*index2 + i) % NPROC];
++        if (proc2->state == RUNNABLE && proc2->priority == *priority) {
++          *index2 = (*index2 + 1 + i) % NPROC;
++          return proc2; // found a runnable process with appropriate priority
++        }
++      case 3:
++        proc2 = &ptable.proc[(*index3 + i) % NPROC];
++        if (proc2->state == RUNNABLE && proc2->priority == *priority){
++          *index3 = (*index3 + 1 + i) % NPROC;
++          return proc2; // found a runnable process with appropriate priority
++        }
++    }
++  }
++  if (*priority == 1) {//did not find any process on any of the prorities
++    *priority = 3;
++    return 0;
++  }
++  else {
++    *priority -= 1; //will try to find a process at a lower priority
++    goto notfound;
++  }
++  return 0;
++}
++
++
++int set_prio(int priority)
++{
++  if(priority < 1 || priority > 3)
++  {
++    return 1;
++  }
++
++  myproc()->priority=priority;
++  yield();
++  return 0;
++}
+\ No newline at end of file
+diff --git a/proc.h b/proc.h
+index 1647114..f525c89 100644
+--- a/proc.h
++++ b/proc.h
+@@ -49,6 +49,13 @@ struct proc {
+   struct file *ofile[NOFILE];  // Open files
+   struct inode *cwd;           // Current directory
+   char name[16];               // Process name (debugging)
++  
++  int priority;
++  int ctime;
++  int stime;
++  int retime;
++  int rutime;
++  int scheduletime;
+ };
+ 
+ // Process memory is laid out contiguously, low addresses first:
+@@ -56,3 +63,7 @@ struct proc {
+ //   original data and bss
+ //   fixed-size stack
+ //   expandable heap
++void Update_Ticks();
++int wait2(int *retime, int *rutime, int *stime);
++
++struct proc* prioritySearch(int *index1, int *index2, int *index3, int *priority);
+diff --git a/sanity.c b/sanity.c
+new file mode 100644
+index 0000000..1e4754b
+--- /dev/null
++++ b/sanity.c
+@@ -0,0 +1,107 @@
++#include "types.h"
++#include "user.h"
++
++int fib(int n)
++{
++	if(n==0 || n==1) return n;
++
++	return fib(n-2)+fib(n-1);
++}
++
++int
++main(int argc, char *argv[])
++{
++	if (argc != 2){
++				printf(1, "Usage: sanity [n]\n");
++				exit();
++ 		}
++	int i;
++	int n;
++	int j = 0;
++	int k;
++	int retime;
++	int rutime;
++	int stime;
++	int sums[3][3];
++	for (i = 0; i < 3; i++)
++		for (j = 0; j < 3; j++)
++			sums[i][j] = 0;
++	n = atoi(argv[1]) * 3;
++	int pid;
++	for (i = 0; i < n; i++) {
++		j = i % 3;
++		pid = fork();
++		if (pid == 0) {//child
++			j = (getpid() -4) % 3; // ensures independence from the first son's pid when gathering the results in the second part of the program
++			switch(j) {
++				case 0: //CPU‐bound process (CPU):
++					for (k = 0; k < 100; k++){
++						for (j = 0; j < 100000; j++){
++							double x =  x + 999.999 * 999.999;
++							fib(2);
++							
++							// printf(1, "");
++						}
++					}
++
++					break;
++				case 1: //short tasks based CPU‐bound process (S‐CPU):
++					for (k = 0; k < 100; k++){
++						for (j = 0; j < 1000000; j++){}
++						yield();
++					}
++					break;
++				case 2:// simulate I/O bound process (IO)
++					for(k = 0; k < 100; k++){
++						sleep(1);
++					}
++					break;
++			}
++			exit(); // children exit here
++		}
++		continue; // father continues to spawn the next child
++	}
++	for (i = 0; i < n; i++) {
++		pid = wait2(&retime, &rutime, &stime);
++		int res = (pid - 4) % 3; // correlates to j in the dispatching loop
++		switch(res) {
++			case 0: // CPU bound processes
++				printf(1, "CPU-bound, pid: %d, ready: %d, running: %d, sleeping: %d, turnaround: %d\n", pid, retime, rutime, stime, retime + rutime + stime);
++				sums[0][0] += retime;
++				sums[0][1] += rutime;
++				sums[0][2] += stime;
++				break;
++			case 1: // CPU bound processes, short tasks
++				printf(1, "CPU-S bound, pid: %d, ready: %d, running: %d, sleeping: %d, turnaround: %d\n", pid, retime, rutime, stime, retime + rutime + stime);
++				sums[1][0] += retime;
++				sums[1][1] += rutime;
++				sums[1][2] += stime;
++				break;
++			case 2: // simulating I/O bound processes
++				printf(1, "I/O bound, pid: %d, ready: %d, running: %d, sleeping: %d, turnaround: %d\n", pid, retime, rutime, stime, retime + rutime + stime);
++				sums[2][0] += retime;
++				sums[2][1] += rutime;
++				sums[2][2] += stime;
++				break;
++		}
++	}
++
++	printf(1, "\n\nCPU bound:\nSum ready time: %d\nSum running time: %d\nSum sleeping time: %d\nSum turnaround time: %d\n\n\n", sums[0][0], sums[0][1], sums[0][2], sums[0][0] + sums[0][1] + sums[0][2]);
++	printf(1, "CPU-S bound:\nSum ready time: %d\nSum running time: %d\nSum sleeping time: %d\nSum turnaround time: %d\n\n\n", sums[1][0], sums[1][1], sums[1][2], sums[1][0] + sums[1][1] + sums[1][2]);
++	printf(1, "I/O bound:\nSum ready time: %d\nSum running time: %d\nSum sleeping time: %d\nSum turnaround time: %d\n\n\n", sums[2][0], sums[2][1], sums[2][2], sums[2][0] + sums[2][1] + sums[2][2]);
++	
++	for (i = 0; i < 3; i++)
++		for (j = 0; j < 3; j++)
++		{
++			sums[i][j] *= 3;
++			sums[i][j] /= n;
++		}
++			
++			
++	printf(1, "\n\nCPU bound:\nAverage ready time: %d\nAverage running time: %d\nAverage sleeping time: %d\nAverage turnaround time: %d\n\n\n", sums[0][0], sums[0][1], sums[0][2], sums[0][0] + sums[0][1] + sums[0][2]);
++	printf(1, "CPU-S bound:\nAverage ready time: %d\nAverage running time: %d\nAverage sleeping time: %d\nAverage turnaround time: %d\n\n\n", sums[1][0], sums[1][1], sums[1][2], sums[1][0] + sums[1][1] + sums[1][2]);
++	printf(1, "I/O bound:\nAverage ready time: %d\nAverage running time: %d\nAverage sleeping time: %d\nAverage turnaround time: %d\n\n\n", sums[2][0], sums[2][1], sums[2][2], sums[2][0] + sums[2][1] + sums[2][2]);
++	
++
++	exit();
++}
+\ No newline at end of file
+diff --git a/syscall.c b/syscall.c
+index ee85261..bf2a019 100644
+--- a/syscall.c
++++ b/syscall.c
+@@ -103,6 +103,11 @@ extern int sys_unlink(void);
+ extern int sys_wait(void);
+ extern int sys_write(void);
+ extern int sys_uptime(void);
++extern int sys_draw(void);
++extern int sys_history(void);
++extern int sys_wait2(void);
++extern int sys_set_prio(void);
++extern int sys_yield(void);
+ 
+ static int (*syscalls[])(void) = {
+ [SYS_fork]    sys_fork,
+@@ -126,6 +131,11 @@ static int (*syscalls[])(void) = {
+ [SYS_link]    sys_link,
+ [SYS_mkdir]   sys_mkdir,
+ [SYS_close]   sys_close,
++[SYS_draw]    sys_draw,
++[SYS_history] sys_history,
++[SYS_wait2]   sys_wait2,
++[SYS_set_prio] sys_set_prio,
++[SYS_yield]  sys_yield,
+ };
+ 
+ void
+diff --git a/syscall.h b/syscall.h
+index bc5f356..0333e19 100644
+--- a/syscall.h
++++ b/syscall.h
+@@ -20,3 +20,8 @@
+ #define SYS_link   19
+ #define SYS_mkdir  20
+ #define SYS_close  21
++#define SYS_draw   22
++#define SYS_history 23
++#define SYS_wait2  24
++#define SYS_set_prio 25
++#define SYS_yield  26
+diff --git a/sysproc.c b/sysproc.c
+index 0686d29..21c112c 100644
+--- a/sysproc.c
++++ b/sysproc.c
+@@ -53,6 +53,8 @@ sys_sbrk(void)
+   addr = myproc()->sz;
+   if(growproc(n) < 0)
+     return -1;
++    
++   
+   return addr;
+ }
+ 
+@@ -89,3 +91,115 @@ sys_uptime(void)
+   release(&tickslock);
+   return xticks;
+ }
++
++
++
++int sys_draw(void)
++{
++
++  char *buf;
++  int size;
++
++  char *wolf = "               \t\t\t,ood8888booo,\n\
++                              ,od8           8bo,\n\
++                           ,od                   bo,\n\
++                         ,d8                       8b,\n\
++                        ,o                           o,    ,a8b\n\
++                       ,8                             8,,od8  8\n\
++                       8'                             d8'     8b\n\
++                       8                           d8'ba     aP'\n\
++                       Y,                       o8'         aP'\n\
++                        Y8,                      YaaaP'    ba\n\
++                         Y8o                   Y8'         88\n\
++                          `Y8               ,8\"           `P\n\
++                            Y8o        ,d8P'              ba\n\
++                       ooood8888888P\"\"\"'                  P'\n\
++                    ,od                                  8\n\
++                 ,dP     o88o                           o'\n\
++                ,dP          8                          8\n\
++               ,d'   oo       8                       ,8\n\
++               $    d$\"8      8           Y    Y  o   8\n\
++              d    d  d8    od  \"\"boooooooob   d\"\" 8   8\n\
++              $    8  d   ood' ,   8        b  8   '8  b\n\
++              $   $  8  8     d  d8        `b  d    '8  b\n\
++               $  $ 8   b    Y  d8          8 ,P     '8  b\n\
++               `$$  Yb  b     8b 8b         8 8,      '8  o,\n\
++                    `Y  b      8o  $$o      d  b        b   $o\n\
++                     8   '$     8$,,$\"      $   $o      '$o$$\n\
++                      $o$$P\"                 $$o$\n\n";
++
++
++  if (argint(1, &size) == -1)
++  {
++    return -1;
++  }
++
++  
++  if (argptr(0, (char **)&buf, size) == -1)
++  {
++    return -1;
++  }
++
++
++  int numofchar = 0;
++  while (wolf[numofchar] != '\0')
++  {
++    numofchar++;
++  }
++
++  if (numofchar > size)
++  {
++    return -1;
++  }
++
++  for (int i = 0; i < numofchar; i++)
++  {
++    buf[i] = wolf[i];
++  }
++
++  return numofchar;
++}
++
++int sys_history(void){
++    char *buffer;
++    int historyId;
++    int size=128;
++    if(argint(1,&historyId)<0){
++       return -1;
++    }
++    if(argptr(0,(char **)&buffer,size)<0){
++       return -1;
++    }
++    return history(buffer,historyId);
++
++}
++
++int sys_wait2(void)
++{
++  int *retime, *rutime, *stime;
++  if (argptr(0, (void*)&retime, sizeof(retime)) < 0)
++    return -1;
++  if (argptr(1, (void*)&rutime, sizeof(rutime)) < 0)
++    return -1;
++  if (argptr(2, (void*)&stime, sizeof(stime)) < 0)
++    return -1;
++  return wait2(retime, rutime, stime);
++}
++
++
++int sys_set_prio(void)
++{
++  int priority;
++
++  if(argint(0, &priority) < 0)
++  return 1;
++  
++  return set_prio(priority);
++}
++
++
++int sys_yield(void)
++{
++  yield();
++  return 0;
++}
+\ No newline at end of file
+diff --git a/test1.c b/test1.c
+new file mode 100644
+index 0000000..3e1b5cb
+--- /dev/null
++++ b/test1.c
+@@ -0,0 +1,64 @@
++#include "types.h"
++#include "user.h"
++#include "spinlock.h"
++
++
++
++int
++main(int argc, char *argv[])
++{
++ if (fork() == 0) {
++   sleep(100);
++    exit();  
++ }
++  
++  
++  
++  if(fork() == 0) {
++    
++    sleep(200);
++    for(int i=0;i<10000;i++)
++    {
++  	printf(1, "%d ", i);
++    } 
++   printf(1, "\n");
++    
++    exit();
++ 
++  }
++
++  // if (fork() == 0) {
++  //   for(int i=0;i<500;i++)
++  //   {
++  //      printf(1, "1");
++  //   }
++  //   printf(1, "\n");
++  //   exit();
++  // }
++
++
++
++  // if(fork() == 0) {
++  //   for(int i=0;i<500;i++)
++  //   {
++	// printf(1, "2");
++  //   }
++  //   printf(1, "\n");
++  //   exit();
++
++  // }
++
++  int retime, rutime, stime;
++  
++  printf(1, "%d\n",wait2(&retime, &rutime, &stime));
++  printf(1, "retime=%d rutime=%d stime=%d\n", retime, rutime, stime);
++  printf(1, "turnaround time=%d\n", retime+rutime+stime);
++  
++  printf(1, "%d\n", wait2(&retime, &rutime, &stime));
++  printf(1, "retime=%d rutime=%d stime=%d\n", retime, rutime, stime);
++  printf(1, "turnaround time=%d\n", retime+rutime+stime);
++  exit();
++  
++ 
++}
++	
+diff --git a/trap.c b/trap.c
+index 41c66eb..9b7667d 100644
+--- a/trap.c
++++ b/trap.c
+@@ -51,6 +51,7 @@ trap(struct trapframe *tf)
+     if(cpuid() == 0){
+       acquire(&tickslock);
+       ticks++;
++      Update_Ticks();
+       wakeup(&ticks);
+       release(&tickslock);
+     }
+@@ -104,7 +105,26 @@ trap(struct trapframe *tf)
+   // If interrupts were on while locks held, would need to check nlock.
+   if(myproc() && myproc()->state == RUNNING &&
+      tf->trapno == T_IRQ0+IRQ_TIMER)
+-    yield();
++     {
++    	#ifdef DEFAULT
++    	//cprintf("THIS IS DEFAULT\n");
++    	if(myproc()->scheduletime + QUANTA <= ticks)
++    	{
++    		yield();
++    	}
++    	
++    	#elif FCFS
++    	//cprintf("THIS IS FCFS\n");	
++      #elif DML
++      if(myproc()->scheduletime + QUANTA <= ticks)
++    	{
++    		 yield();
++      if(myproc()->priority>1) myproc()->priority--;
++    	}
++     
++    	#endif
++
++     }
+ 
+   // Check if the process has been killed since we yielded
+   if(myproc() && myproc()->killed && (tf->cs&3) == DPL_USER)
+diff --git a/user.h b/user.h
+index 4f99c52..cf929a0 100644
+--- a/user.h
++++ b/user.h
+@@ -23,6 +23,12 @@ int getpid(void);
+ char* sbrk(int);
+ int sleep(int);
+ int uptime(void);
++//Added by me
++int draw(void *buf, uint size);
++int history(char*, int);
++int wait2(int *retime, int *rutime, int *stime);
++int set_prio(int priority);
++int yield(void);
+ 
+ // ulib.c
+ int stat(const char*, struct stat*);
+diff --git a/usys.S b/usys.S
+index 8bfd8a1..cb965f1 100644
+--- a/usys.S
++++ b/usys.S
+@@ -29,3 +29,8 @@ SYSCALL(getpid)
+ SYSCALL(sbrk)
+ SYSCALL(sleep)
+ SYSCALL(uptime)
++SYSCALL(draw)
++SYSCALL(history)
++SYSCALL(wait2)
++SYSCALL(set_prio)
++SYSCALL(yield)
+\ No newline at end of file

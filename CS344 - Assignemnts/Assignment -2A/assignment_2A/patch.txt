@@ -1,0 +1,781 @@
+diff --git a/Drawtest.c b/Drawtest.c
+new file mode 100644
+index 0000000..143478b
+--- /dev/null
++++ b/Drawtest.c
+@@ -0,0 +1,29 @@
++#include "types.h"
++#include "stat.h"
++#include "user.h"
++
++const int max_size = 1600;
++
++int main(void)
++{
++
++    
++    void *draw_buffer = malloc(max_size);
++
++    
++    int draw_size = draw(draw_buffer, max_size);
++
++    
++    if (draw_size == -1)
++    {
++  
++        printf(1, "Buffer size is too small\n");
++    }
++    else
++    {
++         
++        printf(1, "%s\n", (char *)draw_buffer);
++    }
++
++    return 0;
++}
+diff --git a/Makefile b/Makefile
+index 09d790c..f1ee894 100644
+--- a/Makefile
++++ b/Makefile
+@@ -181,7 +181,10 @@ UPROGS=\
+ 	_usertests\
+ 	_wc\
+ 	_zombie\
+-
++	_Drawtest\
++	_history\
++	_test1\
++	
+ fs.img: mkfs README $(UPROGS)
+ 	./mkfs fs.img README $(UPROGS)
+ 
+diff --git a/console.c b/console.c
+index a280d2b..dda2a0b 100644
+--- a/console.c
++++ b/console.c
+@@ -15,6 +15,57 @@
+ #include "proc.h"
+ #include "x86.h"
+ 
++// Added by me
++#define KEY_UP          0xE2
++#define KEY_DN          0xE3
++#define KEY_LF          0xE4
++#define KEY_RF          0xE5
++
++#define MAX_HISTORY                 (16)     
++#define MAX_COMMAND_LENGTH          (128)
++
++char command_history[MAX_HISTORY][MAX_COMMAND_LENGTH];
++int historycounter=0;
++int currentcommandid=0;
++
++int history(char* buffer, int historyId){
++
++   if(historyId<0 || historyId>=MAX_HISTORY){
++         return 2;
++   }
++   if(historyId>=historycounter){
++       return 1;
++   }
++   memmove(buffer,command_history[historyId],MAX_COMMAND_LENGTH*sizeof(char));
++   return 0;
++}
++
++
++
++
++void add_history(char *command){
++    if(command[0]!='\0'){
++        int length=strlen(command);
++        if(length>MAX_COMMAND_LENGTH){
++           length=MAX_COMMAND_LENGTH-1;
++        }
++        if(historycounter<MAX_HISTORY){
++           historycounter++;
++        }
++        else{
++           for(int i=0; i<MAX_HISTORY-1; i++){
++             memmove(command_history[i],command_history[i+1],sizeof(char)*MAX_COMMAND_LENGTH);
++           }
++        
++        }
++        memmove(command_history[historycounter-1],command,sizeof(char)*length);
++        command_history[historycounter-1][length]='\0';
++        currentcommandid=historycounter;
++    }
++
++} 
++
++
+ static void consputc(int);
+ 
+ static int panicked = 0;
+@@ -162,6 +213,8 @@ cgaputc(int c)
+   crt[pos] = ' ' | 0x0700;
+ }
+ 
++
++
+ void
+ consputc(int c)
+ {
+@@ -184,14 +237,130 @@ struct {
+   uint r;  // Read index
+   uint w;  // Write index
+   uint e;  // Edit index
++  uint pos; // Added by me current index
+ } input;
+ 
+ #define C(x)  ((x)-'@')  // Control-x
+ 
++int back_counter=0;
++
++
++void move_back_cursor(){
++  int pos;
++  
++  // get cursor position
++  outb(CRTPORT, 14);                  
++  pos = inb(CRTPORT+1) << 8;
++  outb(CRTPORT, 15);
++  pos |= inb(CRTPORT+1);    
++
++  // move back
++  pos--;
++  
++  // reset cursor
++  outb(CRTPORT, 15);
++  outb(CRTPORT+1, (unsigned char)(pos&0xFF));
++  outb(CRTPORT, 14);
++  outb(CRTPORT+1, (unsigned char )((pos>>8)&0xFF));
++  //crt[pos] = ' ' | 0x0700;
++  
++}
++
++void move_forward_cursor(){
++  int pos;
++  
++  // get cursor position
++  outb(CRTPORT, 14);                  
++  pos = inb(CRTPORT+1) << 8;
++  outb(CRTPORT, 15);
++  pos |= inb(CRTPORT+1);    
++
++  // move back
++  pos++;
++  
++ // reset cursor
++  outb(CRTPORT, 15);
++  outb(CRTPORT+1, (unsigned char)(pos&0xFF));
++  outb(CRTPORT, 14);
++  outb(CRTPORT+1, (unsigned char )((pos>>8)&0xFF));
++  //crt[pos] = ' ' | 0x0700;
++
++  
++}
++
++void insert_char(int c,int counter){
++  int pos;
++
++  // get cursor position
++  outb(CRTPORT, 14);                  
++  pos = inb(CRTPORT+1) << 8;
++  outb(CRTPORT, 15);
++  pos |= inb(CRTPORT+1);
++
++  for(int i=pos-counter; i>=pos; i--){
++      crt[i+1]=crt[i];
++  }
++  crt[pos] = (c&0xff) | 0x0700; 
++
++  // move cursor to next position
++  pos += 1;
++
++  outb(CRTPORT, 14);
++  outb(CRTPORT+1, pos>>8);
++  outb(CRTPORT, 15);
++  outb(CRTPORT+1, pos);
++}
++
++void remove_char(int counter){
++  int pos;
++  
++  // get cursor position
++  outb(CRTPORT, 14);                  
++  pos = inb(CRTPORT+1) << 8;
++  outb(CRTPORT, 15);
++  pos |= inb(CRTPORT+1);    
++
++  // move back
++  for(int i=pos-1; i<=pos-counter-1; i++){
++     crt[i]=crt[i+1];
++  }
++  crt[pos-counter]=' ' | 0x0700;
++  // reset cursor
++  pos--;
++  outb(CRTPORT, 15);
++  outb(CRTPORT+1, (unsigned char)(pos&0xFF));
++  outb(CRTPORT, 14);
++  outb(CRTPORT+1, (unsigned char )((pos>>8)&0xFF));
++}
++
++void all_remove_char(){
++  int pos;
++  
++  // get cursor position
++  outb(CRTPORT, 14);                  
++  pos = inb(CRTPORT+1) << 8;
++  outb(CRTPORT, 15);
++  pos |= inb(CRTPORT+1);    
++
++  // move back
++  pos--;
++
++  // reset cursor
++  outb(CRTPORT, 15);
++  outb(CRTPORT+1, (unsigned char)(pos&0xFF));
++  outb(CRTPORT, 14);
++  outb(CRTPORT+1, (unsigned char )((pos>>8)&0xFF));
++  crt[pos] = ' ' | 0x0700;
++}
++
++
++
+ void
+ consoleintr(int (*getc)(void))
+ {
+   int c, doprocdump = 0;
++  char buffer[MAX_COMMAND_LENGTH];
++  int x;
+ 
+   acquire(&cons.lock);
+   while((c = getc()) >= 0){
+@@ -208,20 +377,125 @@ consoleintr(int (*getc)(void))
+       }
+       break;
+     case C('H'): case '\x7f':  // Backspace
++     if(input.pos==input.e){
+       if(input.e != input.w){
+         input.e--;
++        input.pos--;
+         consputc(BACKSPACE);
+       }
++      }
++      else if(input.pos!=input.w){
++           remove_char(back_counter);
++          for(int i=input.pos-1; i<=input.e-1; i++){
++            input.buf[i]=input.buf[i+1];
++          }
++          input.e--;
++          input.pos--;
++      }
++      break;
++    case KEY_LF:
++      if(input.pos>input.r){
++          input.pos--;
++          back_counter--;
++          move_back_cursor();
++      }
+       break;
++    case KEY_RF:
++      if(input.pos<input.e){
++           input.pos++;
++           back_counter++;
++           move_forward_cursor();
++      }
++      break; 
++    case KEY_UP:
++      if(currentcommandid==0){ }
++      else if(currentcommandid>0){
++          for(int i=input.pos; i<input.e; i++){
++            move_forward_cursor();
++          }
++          while(input.e>input.w){
++            input.e--;
++            all_remove_char();
++          }
++          for(int i=0; i<strlen(command_history[currentcommandid-1]); i++){
++             x=command_history[currentcommandid-1][i];
++             cgaputc(x);
++             input.buf[input.e++]=x;
++          }
++          currentcommandid--;
++          input.pos=input.e;
++      }
++      break;
++    case KEY_DN:
++      if(currentcommandid==historycounter-1){
++          for(int i=input.pos; i<input.e; i++){
++            move_forward_cursor();
++          }
++          while(input.e>input.w){
++            input.e--;
++            all_remove_char();
++          }
++          currentcommandid=historycounter;
++      }
++      else if(currentcommandid<historycounter-1){
++          for(int i=input.pos; i<input.e; i++){
++            move_forward_cursor();
++          }
++          while(input.e>input.w){
++            input.e--;
++            all_remove_char();
++          }
++          for(int i=0; i<strlen(command_history[currentcommandid+1]); i++){
++             x=command_history[currentcommandid+1][i];
++             cgaputc(x);
++             input.buf[input.e++]=x;
++          }
++          currentcommandid++;
++          input.pos=input.e;
++          
++      }
++      break;     
+     default:
+       if(c != 0 && input.e-input.r < INPUT_BUF){
+         c = (c == '\r') ? '\n' : c;
++        if(c == '\n' || c == C('D') || input.e == input.r+INPUT_BUF){
+         input.buf[input.e++ % INPUT_BUF] = c;
+         consputc(c);
+-        if(c == '\n' || c == C('D') || input.e == input.r+INPUT_BUF){
++        
++        back_counter=0;
++        for(int i=input.w,k=0; i<input.e-1; i++,k++){
++             buffer[k]=input.buf[i % INPUT_BUF];
++        }
++        buffer[(input.e-1-input.w)%INPUT_BUF]='\0';
++        
++        add_history(buffer);
++        
+           input.w = input.e;
++          input.pos=input.e;
+           wakeup(&input.r);
+         }
++        else{
++            if(back_counter==0){
++              input.buf[input.e++ % INPUT_BUF] = c;
++              input.pos++;
++        consputc(c);
++            }
++            else{
++              insert_char(c, back_counter); 
++              for(int k=input.e+1; k >= input.pos; k--){
++              input.buf[(k + 1) % INPUT_BUF] = input.buf[k % INPUT_BUF];
++              }
++
++            //insert
++            input.buf[(input.pos) % INPUT_BUF] = c;
++
++            input.e++;
++            input.pos++;
++
++            //insert the char into CRT propoly position
++            
++            }
++        }
+       }
+       break;
+     }
+diff --git a/defs.h b/defs.h
+index 82fb982..12088a2 100644
+--- a/defs.h
++++ b/defs.h
+@@ -21,6 +21,7 @@ void            consoleinit(void);
+ void            cprintf(char*, ...);
+ void            consoleintr(int(*)(void));
+ void            panic(char*) __attribute__((noreturn));
++int             history(char*, int);
+ 
+ // exec.c
+ int             exec(char*, char**);
+diff --git a/history.c b/history.c
+new file mode 100644
+index 0000000..4fe1571
+--- /dev/null
++++ b/history.c
+@@ -0,0 +1,24 @@
++#include "types.h"
++#include "stat.h"
++#include "user.h"
++
++#define MAX_HISTORY                 (16)      /*the max number of the comand histories*/
++#define MAX_COMMAND_LENGTH          (128)     /*the max length of the comand*/
++
++
++int main(int argc, char *argv[])
++{
++    char buffer[MAX_COMMAND_LENGTH];
++    int ret = 0;
++    for(int i = 0; i < MAX_HISTORY && ret==0; i++){
++        memset(buffer, 0, 128 * sizeof(char));
++
++        ret = history(buffer, i);
++        
++        if(ret == 0){
++            printf(1, "%s\n", buffer);
++        }
++    }
++
++    exit();
++}
+diff --git a/proc.c b/proc.c
+index 806b1b1..eb71a00 100644
+--- a/proc.c
++++ b/proc.c
+@@ -88,7 +88,11 @@ allocproc(void)
+ found:
+   p->state = EMBRYO;
+   p->pid = nextpid++;
+-
++  p->ctime = ticks;
++  p->stime = 0;
++  p->retime = 0;
++  p->rutime = 0;
++  
+   release(&ptable.lock);
+ 
+   // Allocate kernel stack.
+@@ -311,6 +315,53 @@ wait(void)
+   }
+ }
+ 
++int wait2(int *retime, int *rutime, int *stime) {
++  struct proc *p;
++  int havekids, pid;
++  struct proc *curproc = myproc();
++  
++  acquire(&ptable.lock);
++  for(;;){
++    // Scan through table looking for zombie children.
++    havekids = 0;
++    for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
++      if(p->parent != curproc)
++        continue;
++      havekids = 1;
++      if(p->state == ZOMBIE){
++        // Found one.
++        *retime = p->retime;
++        *rutime = p->rutime;
++        *stime = p->stime;
++        pid = p->pid;
++        kfree(p->kstack);
++        p->kstack = 0;
++        freevm(p->pgdir);
++        p->state = UNUSED;
++        p->pid = 0;
++        p->parent = 0;
++        p->name[0] = 0;
++        p->killed = 0;
++        p->ctime = 0;
++        p->retime = 0;
++        p->rutime = 0;
++        p->stime = 0;
++        release(&ptable.lock);
++        return pid;
++      }
++    }
++
++    // No point waiting if we don't have any children.
++    if(!havekids || curproc->killed){
++      release(&ptable.lock);
++      return -1;
++    }
++
++    // Wait for children to exit.  (See wakeup1 call in proc_exit.)
++    sleep(curproc, &ptable.lock);  //DOC: wait-sleep
++  }
++}
++
+ //PAGEBREAK: 42
+ // Per-CPU process scheduler.
+ // Each CPU calls scheduler() after setting itself up.
+@@ -532,3 +583,30 @@ procdump(void)
+     cprintf("\n");
+   }
+ }
++
++void Update_Ticks()
++{
++	struct proc *p;
++	acquire(&ptable.lock);
++	for(p = ptable.proc; p < &ptable.proc[NPROC]; p++)
++	{
++		switch(p->state)
++		{
++			case SLEEPING:
++			p->stime++;
++			break;
++			
++			case RUNNABLE:
++			p->retime++;
++			break;
++			
++			case RUNNING:
++			p->rutime++;
++			break;
++			
++			default:
++			;
++		}
++	}
++	release(&ptable.lock);
++}
+diff --git a/proc.h b/proc.h
+index 1647114..0122b70 100644
+--- a/proc.h
++++ b/proc.h
+@@ -49,6 +49,11 @@ struct proc {
+   struct file *ofile[NOFILE];  // Open files
+   struct inode *cwd;           // Current directory
+   char name[16];               // Process name (debugging)
++  
++  int ctime;
++  int stime;
++  int retime;
++  int rutime;
+ };
+ 
+ // Process memory is laid out contiguously, low addresses first:
+@@ -56,3 +61,5 @@ struct proc {
+ //   original data and bss
+ //   fixed-size stack
+ //   expandable heap
++void Update_Ticks();
++int wait2(int *retime, int *rutime, int *stime);
+diff --git a/syscall.c b/syscall.c
+index ee85261..a98afeb 100644
+--- a/syscall.c
++++ b/syscall.c
+@@ -103,6 +103,9 @@ extern int sys_unlink(void);
+ extern int sys_wait(void);
+ extern int sys_write(void);
+ extern int sys_uptime(void);
++extern int sys_draw(void);
++extern int sys_history(void);
++extern int sys_wait2(void);
+ 
+ static int (*syscalls[])(void) = {
+ [SYS_fork]    sys_fork,
+@@ -126,6 +129,9 @@ static int (*syscalls[])(void) = {
+ [SYS_link]    sys_link,
+ [SYS_mkdir]   sys_mkdir,
+ [SYS_close]   sys_close,
++[SYS_draw]    sys_draw,
++ [SYS_history] sys_history,
++[SYS_wait2]   sys_wait2,
+ };
+ 
+ void
+diff --git a/syscall.h b/syscall.h
+index bc5f356..431c30d 100644
+--- a/syscall.h
++++ b/syscall.h
+@@ -20,3 +20,6 @@
+ #define SYS_link   19
+ #define SYS_mkdir  20
+ #define SYS_close  21
++#define SYS_draw   22
++#define SYS_history 23
++#define SYS_wait2  24
+diff --git a/sysproc.c b/sysproc.c
+index 0686d29..203604a 100644
+--- a/sysproc.c
++++ b/sysproc.c
+@@ -53,6 +53,8 @@ sys_sbrk(void)
+   addr = myproc()->sz;
+   if(growproc(n) < 0)
+     return -1;
++    
++   
+   return addr;
+ }
+ 
+@@ -89,3 +91,99 @@ sys_uptime(void)
+   release(&tickslock);
+   return xticks;
+ }
++
++
++
++int sys_draw(void)
++{
++
++  char *buf;
++  int size;
++
++  char *wolf = "               \t\t\t,ood8888booo,\n\
++                              ,od8           8bo,\n\
++                           ,od                   bo,\n\
++                         ,d8                       8b,\n\
++                        ,o                           o,    ,a8b\n\
++                       ,8                             8,,od8  8\n\
++                       8'                             d8'     8b\n\
++                       8                           d8'ba     aP'\n\
++                       Y,                       o8'         aP'\n\
++                        Y8,                      YaaaP'    ba\n\
++                         Y8o                   Y8'         88\n\
++                          `Y8               ,8\"           `P\n\
++                            Y8o        ,d8P'              ba\n\
++                       ooood8888888P\"\"\"'                  P'\n\
++                    ,od                                  8\n\
++                 ,dP     o88o                           o'\n\
++                ,dP          8                          8\n\
++               ,d'   oo       8                       ,8\n\
++               $    d$\"8      8           Y    Y  o   8\n\
++              d    d  d8    od  \"\"boooooooob   d\"\" 8   8\n\
++              $    8  d   ood' ,   8        b  8   '8  b\n\
++              $   $  8  8     d  d8        `b  d    '8  b\n\
++               $  $ 8   b    Y  d8          8 ,P     '8  b\n\
++               `$$  Yb  b     8b 8b         8 8,      '8  o,\n\
++                    `Y  b      8o  $$o      d  b        b   $o\n\
++                     8   '$     8$,,$\"      $   $o      '$o$$\n\
++                      $o$$P\"                 $$o$\n\n";
++
++
++  if (argint(1, &size) == -1)
++  {
++    return -1;
++  }
++
++  
++  if (argptr(0, (char **)&buf, size) == -1)
++  {
++    return -1;
++  }
++
++
++  int numofchar = 0;
++  while (wolf[numofchar] != '\0')
++  {
++    numofchar++;
++  }
++
++  if (numofchar > size)
++  {
++    return -1;
++  }
++
++  for (int i = 0; i < numofchar; i++)
++  {
++    buf[i] = wolf[i];
++  }
++
++  return numofchar;
++}
++
++int sys_history(void){
++    char *buffer;
++    int historyId;
++    int size=128;
++    if(argint(1,&historyId)<0){
++       return -1;
++    }
++    if(argptr(0,(char **)&buffer,size)<0){
++       return -1;
++    }
++    return history(buffer,historyId);
++
++}
++
++int sys_wait2(void)
++{
++  int *retime, *rutime, *stime;
++  if (argptr(0, (void*)&retime, sizeof(retime)) < 0)
++    return -1;
++  if (argptr(1, (void*)&rutime, sizeof(rutime)) < 0)
++    return -1;
++  if (argptr(2, (void*)&stime, sizeof(stime)) < 0)
++    return -1;
++  return wait2(retime, rutime, stime);
++}
++
++
+diff --git a/test1.c b/test1.c
+new file mode 100644
+index 0000000..c545ad6
+--- /dev/null
++++ b/test1.c
+@@ -0,0 +1,43 @@
++#include "types.h"
++#include "user.h"
++#include "spinlock.h"
++
++
++
++int
++main(int argc, char *argv[])
++{
++  if (fork() == 0) {
++    sleep(100);
++    exit();  
++  }
++  
++  
++  
++  if(fork() == 0) {
++    
++    sleep(200);
++    for(int i=0;i<10000;i++)
++    {
++  	printf(1, "%d ", i);
++    } 
++    printf(1, "\n");
++    
++    exit();
++ 
++  }
++
++  int retime, rutime, stime;
++  
++  printf(1, "%d\n",wait2(&retime, &rutime, &stime));
++  printf(1, "retime=%d rutime=%d stime=%d\n", retime, rutime, stime);
++  printf(1, "turnaround time=%d\n", retime+rutime+stime);
++  
++  printf(1, "%d\n", wait2(&retime, &rutime, &stime));
++  printf(1, "retime=%d rutime=%d stime=%d\n", retime, rutime, stime);
++  printf(1, "turnaround time=%d\n", retime+rutime+stime);
++  exit();
++  
++ 
++}
++	
+diff --git a/trap.c b/trap.c
+index 41c66eb..65785cc 100644
+--- a/trap.c
++++ b/trap.c
+@@ -51,6 +51,7 @@ trap(struct trapframe *tf)
+     if(cpuid() == 0){
+       acquire(&tickslock);
+       ticks++;
++      Update_Ticks();
+       wakeup(&ticks);
+       release(&tickslock);
+     }
+diff --git a/user.h b/user.h
+index 4f99c52..dfa0123 100644
+--- a/user.h
++++ b/user.h
+@@ -23,6 +23,10 @@ int getpid(void);
+ char* sbrk(int);
+ int sleep(int);
+ int uptime(void);
++//Added by me
++int draw(void *buf, uint size);
++int history(char*, int);
++int wait2(int *retime, int *rutime, int *stime);
+ 
+ // ulib.c
+ int stat(const char*, struct stat*);
+diff --git a/usys.S b/usys.S
+index 8bfd8a1..6d09fc9 100644
+--- a/usys.S
++++ b/usys.S
+@@ -29,3 +29,6 @@ SYSCALL(getpid)
+ SYSCALL(sbrk)
+ SYSCALL(sleep)
+ SYSCALL(uptime)
++SYSCALL(draw)
++SYSCALL(history)
++SYSCALL(wait2)
